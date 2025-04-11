@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BPM Analyzer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      padding: 1em;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .container {
+      width: 100%;
+      max-width: 600px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      padding: 1.5em;
+      box-sizing: border-box;
+    }
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+      margin-top: 0;
+    }
+    input[type="file"] {
+      display: block;
+      width: 100%;
+      margin: 1em auto;
+      padding: 0.8em;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: white;
+      font-size: 16px;
+    }
+    canvas {
+      width: 100%;
+      height: 100px;
+      background: #f9f9f9;
+      margin: 1em 0;
+      border-radius: 8px;
+      border: 1px solid #eee;
+    }
+    audio {
+      display: block;
+      margin: 1em auto;
+      width: 100%;
+      border-radius: 8px;
+    }
+    #bpm {
+      font-size: 1.2em;
+      margin-bottom: 1em;
+      text-align: center;
+      font-weight: bold;
+      color: #2c3e50;
+    }
+    #tapButton {
+      background: #3498db;
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      font-size: 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-bottom: 1em;
+      font-weight: bold;
+      width: 100%;
+      transition: all 0.2s;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    #tapButton:hover, #tapButton:focus {
+      background: #2980b9;
+      transform: translateY(-1px);
+    }
+    #tapButton:active {
+      transform: translateY(0);
+    }
+    .instructions {
+      font-size: 0.9em;
+      color: #7f8c8d;
+      margin-bottom: 1em;
+      text-align: center;
+    }
+    
+    @media (max-width: 480px) {
+      body {
+        padding: 0.5em;
+      }
+      .container {
+        padding: 1em;
+      }
+      h1 {
+        font-size: 1.5em;
+      }
+      #tapButton {
+        padding: 15px 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>BPM Analyzer</h1>
+    <input type="file" id="audioFile" accept="audio/*"/>
+    <audio id="player" controls></audio>
+    <canvas id="waveform"></canvas>
+    <div id="bpm">BPM: --</div>
+    <button id="tapButton">TAP BPM (or press SPACE BAR)</button>
+    <div class="instructions">Tap along to the beat to calculate BPM</div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('audioFile');
+    const canvas = document.getElementById('waveform');
+    const ctx = canvas.getContext('2d');
+    const bpmDisplay = document.getElementById('bpm');
+    const player = document.getElementById('player');
+    const tapButton = document.getElementById('tapButton');
+
+    function resizeCanvas() {
+      canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+      canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    }
+    
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // BPM Tap variables
+    let tapTimes = [];
+    const maxTaps = 10;
+
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const url = URL.createObjectURL(file);
+      player.src = url;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+      drawWaveform(audioBuffer);
+    });
+
+    function drawWaveform(buffer) {
+      const raw = buffer.getChannelData(0);
+      const step = Math.floor(raw.length / canvas.width * window.devicePixelRatio);
+      const amp = (canvas.height / window.devicePixelRatio) / 2;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      for (let i = 0; i < canvas.width / window.devicePixelRatio; i++) {
+        const min = raw[i * step];
+        ctx.lineTo(i, (1 + min) * amp);
+      }
+      ctx.strokeStyle = "#3498db";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // BPM Tap functionality
+    function tapBPM() {
+      const now = Date.now();
+      
+      // Remove taps older than 4 seconds
+      tapTimes = tapTimes.filter(time => now - time < 4000);
+      
+      tapTimes.push(now);
+      
+      if (tapTimes.length > 1) {
+        const intervals = [];
+        for (let i = 1; i < tapTimes.length; i++) {
+          intervals.push(tapTimes[i] - tapTimes[i - 1]);
+        }
+        
+        const averageInterval = intervals.reduce((sum, interval) => sum + interval, 0) / intervals.length;
+        const bpm = Math.round(60000 / averageInterval);
+        const halftimeBpm = Math.round(bpm / 2);
+        bpmDisplay.textContent = `BPM: ${bpm} / ${halftimeBpm}`;
+      } else {
+        bpmDisplay.textContent = `Tap again to calculate BPM...`;
+      }
+      
+      // Keep only the last maxTaps taps
+      if (tapTimes.length > maxTaps) {
+        tapTimes.shift();
+      }
+      
+      // Visual feedback
+      tapButton.style.backgroundColor = "#2ecc71";
+      setTimeout(() => {
+        tapButton.style.backgroundColor = "#3498db";
+      }, 100);
+    }
+
+    // Event listeners for tap button and keyboard
+    tapButton.addEventListener('click', tapBPM);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === ' ') {
+        e.preventDefault(); // Prevent scrolling when pressing space
+        tapBPM();
+        // Visual feedback for key press
+        tapButton.style.transform = 'scale(0.98)';
+        setTimeout(() => {
+          tapButton.style.transform = 'scale(1)';
+        }, 100);
+      }
+    });
+
+    function enableTapFocus() {
+      tapButton.focus();
+    }
+
+    // Focus TAP button after audio is played or clicked
+    player.addEventListener('play', enableTapFocus);
+    player.addEventListener('click', enableTapFocus);
+
+    // Also focus after file selection, in case you want to tap right away
+    fileInput.addEventListener('change', () => {
+      setTimeout(enableTapFocus, 100); // slight delay to let audio load first
+    });
+  </script>
+</body>
+</html>
